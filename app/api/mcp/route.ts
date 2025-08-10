@@ -287,11 +287,19 @@ const handlerFactory = (server: any) => {
   );
 };
 
-export const { GET, POST } = createMcpHandler(
+const mcpHandler = createMcpHandler(
   handlerFactory,
   { basePath: "/api", auth: { type: "bearer", token: TOKEN } },
   { verboseLogs: true }
 );
+
+export async function GET(request: Request) {
+  return mcpHandler(request);
+}
+
+export async function POST(request: Request) {
+  return mcpHandler(request);
+}
 
 export async function OPTIONS() {
   return new Response(null, {
