@@ -291,6 +291,13 @@ const handlerFactory = (server) => {
 /* ──────────────────────────────────────────────────────────────
    5.  Exports for Vercel/Cloudflare
 ────────────────────────────────────────────────────────────── */
+export async function GET() {
+  return new Response(JSON.stringify({ ok: true }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 export const { GET, POST } = createMcpHandler(
   handlerFactory,
   { basePath: "/api", auth: { type: "bearer", token: TOKEN } },
