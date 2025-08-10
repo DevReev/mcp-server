@@ -1,16 +1,16 @@
-// © 2025 – Shah Rukh Khan Pickup-Lines & Date-Locations MCP Server (JS Edition) with LLM Utility
+// © 2025 – Shah Rukh Khan Pickup-Lines & Date-Locations MCP Server (TS Edition) with LLM Utility
 
 /* ──────────────────────────────────────────────────────────────
-   0.  Runtime & Deps
+0. Runtime & Deps
 ────────────────────────────────────────────────────────────── */
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
 
 /* ──────────────────────────────────────────────────────────────
-   1.  Environment
+1. Environment
 ────────────────────────────────────────────────────────────── */
-const TOKEN = process.env.AUTH_TOKEN;
-const MY_NUMBER = process.env.MY_NUMBER;
+const TOKEN = process.env.AUTH_TOKEN!;
+const MY_NUMBER = process.env.MY_NUMBER!;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const HF_TOKEN = process.env.HF_TOKEN;
@@ -20,19 +20,29 @@ if (!TOKEN || !MY_NUMBER) {
 }
 
 /* ──────────────────────────────────────────────────────────────
-   2.  LLM Utility Class
+2. LLM Utility Class
 ────────────────────────────────────────────────────────────── */
+type Provider = {
+  name: string;
+  endpoint: string;
+  headers: Record<string, string>;
+  model: string;
+  priority: number;
+};
+
 class LLMUtility {
+  private providers: Provider[];
+  private fallbackEnabled = true;
+  private maxRetries = 3;
+  private retryDelay = 1000;
+
   constructor() {
     this.providers = this.initProviders();
-    this.fallbackEnabled = true;
-    this.maxRetries = 3;
-    this.retryDelay = 1000;
   }
 
-  initProviders() {
-    const list = [];
-    if (OPENAI_API_KEY)
+  private initProviders(): Provider[] {
+    const list: Provider[] = [];
+    if (OPENAI_API_KEY) {
       list.push({
         name: "openai",
         endpoint: "https://api.openai.com/v1/chat/completions",
@@ -43,7 +53,8 @@ class LLMUtility {
         model: "gpt-3.5-turbo",
         priority: 1,
       });
-    if (ANTHROPIC_API_KEY)
+    }
+    if (ANTHROPIC_API_KEY) {
       list.push({
         name: "anthropic",
         endpoint: "https://api.anthropic.com/v1/messages",
@@ -55,7 +66,8 @@ class LLMUtility {
         model: "claude-3-haiku-20240307",
         priority: 2,
       });
-    if (HF_TOKEN)
+    }
+    if (HF_TOKEN) {
       list.push({
         name: "huggingface",
         endpoint:
@@ -67,10 +79,14 @@ class LLMUtility {
         model: "microsoft/DialoGPT-small",
         priority: 3,
       });
+    }
     return list.sort((a, b) => a.priority - b.priority);
   }
 
-  async generateText(prompt, context = {}) {
+  async generateText(
+    prompt: string,
+    context: any = {}
+  ): Promise<{ text: string; provider: string; model: string }> {
     if (!this.providers.length) {
       return {
         text: this.fallback(prompt, context),
@@ -80,10 +96,10 @@ class LLMUtility {
     }
     for (const p of this.providers) {
       try {
-        const out = await this.call(p, prompt, context);
+        const out = await this.callProvider(p, prompt, context);
         if (out) return { text: out, provider: p.name, model: p.model };
-      } catch (err) {
-        console.warn(`LLM ${p.name} failed:`, err.message);
+      } catch {
+        /* try next */
       }
     }
     return {
@@ -93,32 +109,37 @@ class LLMUtility {
     };
   }
 
-  async call(provider, prompt, context) {
-    const payload = this.makePayload(provider, prompt, context);
+  private async callProvider(
+    p: Provider,
+    prompt: string,
+    context: any
+  ): Promise<string> {
+    const payload = this.makePayload(p, prompt, context);
     for (let i = 1; i <= this.maxRetries; i++) {
-      const resp = await fetch(provider.endpoint, {
+      const resp = await fetch(p.endpoint, {
         method: "POST",
-        headers: provider.headers,
+        headers: p.headers,
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(30000),
       });
       if (resp.ok) {
         const data = await resp.json();
-        return this.extract(provider, data);
+        return this.extract(p, data);
       }
       if (resp.status === 429) {
         await this.delay(this.retryDelay * i);
         continue;
       }
-      throw new Error(`${provider.name} HTTP ${resp.status}`);
+      throw new Error(`${p.name} HTTP ${resp.status}`);
     }
+    throw new Error("LLM retries exhausted");
   }
 
-  makePayload(provider, prompt, context) {
-    switch (provider.name) {
+  private makePayload(p: Provider, prompt: string, context: any): any {
+    switch (p.name) {
       case "openai":
         return {
-          model: provider.model,
+          model: p.model,
           messages: [
             {
               role: "system",
@@ -132,7 +153,7 @@ class LLMUtility {
         };
       case "anthropic":
         return {
-          model: provider.model,
+          model: p.model,
           system: context.systemPrompt || "You are a helpful assistant.",
           messages: [{ role: "user", content: prompt }],
           max_tokens: context.maxTokens || 150,
@@ -151,12 +172,11 @@ class LLMUtility {
     }
   }
 
-  extract(provider, data) {
-    if (provider.name === "openai")
-      return data.choices?.[0]?.message?.content || "";
-    if (provider.name === "anthropic") return data?.content?.[0]?.text || "";
+  private extract(p: Provider, data: any): string {
+    if (p.name === "openai") return data.choices?.[0]?.message?.content || "";
+    if (p.name === "anthropic") return data?.content?.[0]?.text || "";
     if (
-      provider.name === "huggingface" &&
+      p.name === "huggingface" &&
       Array.isArray(data) &&
       data[0]?.generated_text
     ) {
@@ -165,23 +185,23 @@ class LLMUtility {
     return "";
   }
 
-  fallback(prompt, context) {
+  private fallback(prompt: string, context: any): string {
     return "🤖 (fallback response)";
   }
 
-  delay(ms) {
+  private delay(ms: number): Promise<void> {
     return new Promise((r) => setTimeout(r, ms));
   }
 }
 
 /* ──────────────────────────────────────────────────────────────
-   3.  Utility Helpers
+3. Helpers
 ────────────────────────────────────────────────────────────── */
 const USER_AGENT = "Puch/1.0 (Autonomous)";
 const DDG_HTML = "https://html.duckduckgo.com/html/?q=";
 const llm = new LLMUtility();
 
-async function stripHtml(html) {
+async function stripHtml(html: string): Promise<string> {
   return html
     .replace(/<[^>]+>/g, "")
     .replace(/\s{2,}/g, " ")
@@ -189,15 +209,15 @@ async function stripHtml(html) {
 }
 
 /* ──────────────────────────────────────────────────────────────
-   4.  MCP Handler
+4. MCP Handler
 ────────────────────────────────────────────────────────────── */
-const handlerFactory = (server) => {
-  // 4.1 Validate
-  server.tool("validate", "Return owner number", {}, async () => ({
-    content: [{ type: "text", text: MY_NUMBER }],
-  }));
+const handlerFactory = (server: any) => {
+  // validate
+  server.tool("validate", "Return owner number", {}, async () => {
+    return { content: [{ type: "text", text: MY_NUMBER }] };
+  });
 
-  // 4.2 SRK Pickup Line
+  // generate_srk_pickup_line
   server.tool(
     "generate_srk_pickup_line",
     "SRK-style pickup line",
@@ -215,16 +235,13 @@ const handlerFactory = (server) => {
       });
       return {
         content: [
-          {
-            type: "text",
-            text: `💕 "${res.text}"\n\n*(${res.provider})*`,
-          },
+          { type: "text", text: `💕 "${res.text}"\n\n*(${res.provider})*` },
         ],
       };
     }
   );
 
-  // 4.3 Date Locations
+  // find_date_locations
   server.tool(
     "find_date_locations",
     "Suggest date spots",
@@ -260,7 +277,7 @@ const handlerFactory = (server) => {
     }
   );
 
-  // 4.4 Flirty Reply
+  // generate_srk_flirty_reply
   server.tool(
     "generate_srk_flirty_reply",
     "SRK-style flirty reply",
@@ -278,10 +295,7 @@ const handlerFactory = (server) => {
       });
       return {
         content: [
-          {
-            type: "text",
-            text: `💕 "${res.text}"\n\n*(${res.provider})*`,
-          },
+          { type: "text", text: `💕 "${res.text}"\n\n*(${res.provider})*` },
         ],
       };
     }
@@ -289,8 +303,9 @@ const handlerFactory = (server) => {
 };
 
 /* ──────────────────────────────────────────────────────────────
-   5.  Exports for Vercel/Cloudflare
+5. Exports for Vercel/Cloudflare
 ────────────────────────────────────────────────────────────── */
+// Test GET endpoint
 export async function GET() {
   return new Response(JSON.stringify({ ok: true }), {
     status: 200,
@@ -298,13 +313,13 @@ export async function GET() {
   });
 }
 
-export const { GET, POST } = createMcpHandler(
+export const { GET: _, POST } = createMcpHandler(
   handlerFactory,
   { basePath: "/api", auth: { type: "bearer", token: TOKEN } },
   { verboseLogs: true }
 );
 
-// CORS preflight support
+// CORS preflight
 export async function OPTIONS() {
   return new Response(null, {
     status: 204,
