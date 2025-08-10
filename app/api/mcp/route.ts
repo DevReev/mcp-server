@@ -145,18 +145,21 @@ class LLMUtility {
             do_sample: true,
           },
         };
+      default:
+        throw new Error(`Unknown provider: ${p.name}`);
     }
   }
 
   private extract(p: Provider, data: any): string {
     if (p.name === "openai") return data.choices?.[0]?.message?.content || "";
     if (p.name === "anthropic") return data?.content?.[0]?.text || "";
-    if (
-      p.name === "huggingface" &&
-      Array.isArray(data) &&
-      data?.generated_text
-    ) {
-      return data.generated_text.replace(data.inputs || "", "").trim();
+    if (p.name === "huggingface") {
+      if (Array.isArray(data) && data[0]?.generated_text) {
+        return data[0].generated_text.replace(data[0].inputs || "", "").trim();
+      }
+      if (data?.generated_text) {
+        return data.generated_text.replace(data.inputs || "", "").trim();
+      }
     }
     return "";
   }
@@ -166,12 +169,7 @@ const llm = new LLMUtility();
 const USER_AGENT = "Puch/1.0";
 const DDG_HTML = "https://html.duckduckgo.com/html/?q=";
 
-async function stripHtml(html: string): Promise<string> {
-  return html
-    .replace(/<[^>]+>/g, "")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-}
+// Removed unused stripHtml function
 
 const handlerFactory = (server: any) => {
   server.tool("validate", "Return owner number", {}, async () => ({
@@ -182,7 +180,13 @@ const handlerFactory = (server: any) => {
     "generate_srk_pickup_line",
     "SRK-style pickup line",
     { user_info: z.string(), target_info: z.string().optional() },
-    async ({ user_info, target_info }) => {
+    async ({
+      user_info,
+      target_info,
+    }: {
+      user_info: string;
+      target_info?: string;
+    }) => {
       const prompt =
         `Write a romantic SRK pickup line for ${user_info}` +
         (target_info ? ` about ${target_info}` : "");
@@ -206,30 +210,59 @@ const handlerFactory = (server: any) => {
       date_type: z.string().default("romantic"),
       budget: z.string().default("moderate"),
     },
-    async ({ city, date_type, budget }) => {
-      const q = `best ${date_type} date spots ${city} ${budget}`;
-      const r = await fetch(`${DDG_HTML}${encodeURIComponent(q)}`, {
-        headers: { "User-Agent": USER_AGENT },
-      });
-      if (!r.ok) throw new Error("Search failed");
-      const html = await r.text();
-      const items = [
-        ...html.matchAll(
-          /result__a href="([^"]+)">([^<]+)<\/a>[\s\S]*?result__snippet">([^<]+)/gi
-        ),
-      ]
-        .slice(0, 5)
-        .map(([, url, title, snip]) => ({
-          url,
-          title: title.trim(),
-          snippet: snip.trim().slice(0, 200),
-        }));
-      const text = items
-        .map(
-          (it, i) => `**${i + 1}. ${it.title}**\n${it.snippet}...\n🔗 ${it.url}`
-        )
-        .join("\n\n");
-      return { content: [{ type: "text", text: text || "No spots found" }] };
+    async ({
+      city,
+      date_type,
+      budget,
+    }: {
+      city: string;
+      date_type: string;
+      budget: string;
+    }) => {
+      try {
+        const q = `best ${date_type} date spots ${city} ${budget}`;
+        const r = await fetch(`${DDG_HTML}${encodeURIComponent(q)}`, {
+          headers: { "User-Agent": USER_AGENT },
+        });
+        if (!r.ok) throw new Error(`Search failed with status ${r.status}`);
+
+        const html = await r.text();
+        const regex =
+          /result__a[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>[\s\S]*?result__snippet[^>]*>([^<]+)/gi;
+        const matches = [...html.matchAll(regex)];
+
+        const items = matches
+          .slice(0, 5)
+          .map(([, url, title, snip]) => ({
+            url: url.trim(),
+            title: title.trim(),
+            snippet: snip.trim().slice(0, 200),
+          }))
+          .filter((item) => item.title && item.snippet);
+
+        const text =
+          items.length > 0
+            ? items
+                .map(
+                  (it, i) =>
+                    `**${i + 1}. ${it.title}**\n${it.snippet}...\n🔗 ${it.url}`
+                )
+                .join("\n\n")
+            : "No date spots found for your search criteria.";
+
+        return { content: [{ type: "text", text }] };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error finding date locations: ${
+                error instanceof Error ? error.message : "Unknown error"
+              }`,
+            },
+          ],
+        };
+      }
     }
   );
 
@@ -237,7 +270,7 @@ const handlerFactory = (server: any) => {
     "generate_srk_flirty_reply",
     "SRK-style flirty reply",
     { message: z.string(), your_name: z.string().optional() },
-    async ({ message, your_name }) => {
+    async ({ message, your_name }: { message: string; your_name?: string }) => {
       const prompt =
         `Reply flirtatiously as SRK to: "${message}"` +
         (your_name ? ` from ${your_name}` : "");
