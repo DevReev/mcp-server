@@ -287,7 +287,7 @@ const handlerFactory = (server: any) => {
   );
 };
 
-const mcpHandler = createMcpHandler(handlerFactory);
+const mcpHandler = createMcpHandler(handlerFactory, {}, { basePath: "/api" });
 
 export async function GET(request: Request) {
   return mcpHandler(request);
