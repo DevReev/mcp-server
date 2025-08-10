@@ -608,9 +608,18 @@ Generate only the SRK-style reply:`;
    ────────────────────────────────────────────────────────────── */
 export const { GET, POST } = createMcpHandler(
   handlerFactory,
-  {
-    basePath: "/api",
-    auth: { type: "bearer", token: TOKEN },
-  },
+  { basePath: "/api", auth: { type: "bearer", token: TOKEN } },
   { verboseLogs: true }
 );
+
+// Add this to avoid 405 on preflight and other OPTIONS requests
+export async function OPTIONS(request) {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Authorization, Content-Type",
+    },
+  });
+}
