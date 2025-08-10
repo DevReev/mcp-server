@@ -287,11 +287,7 @@ const handlerFactory = (server: any) => {
   );
 };
 
-const mcpHandler = createMcpHandler(
-  handlerFactory,
-  { basePath: "/api", auth: { type: "bearer", token: TOKEN } },
-  { verboseLogs: true }
-);
+const mcpHandler = createMcpHandler(handlerFactory);
 
 export async function GET(request: Request) {
   return mcpHandler(request);
